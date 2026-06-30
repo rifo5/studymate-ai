@@ -107,3 +107,41 @@ def gorev_ekle(gorev: YeniGorev):
         "toplam_gorev": len(gorev_listesi),
         "tum_gorevler": gorev_listesi
     }
+
+# Görev sil - DELETE
+@app.delete("/gorev-sil/{index}")
+def gorev_sil(index: int):
+    if index < 0 or index >= len(gorev_listesi):
+        return {
+            "hata": "Bu numarada görev yok!",
+            "toplam_gorev": len(gorev_listesi)
+        }
+    
+    silinen = gorev_listesi.pop(index)
+    return {
+        "mesaj": f"'{silinen['baslik']}' silindi! 🗑️",
+        "toplam_gorev": len(gorev_listesi),
+        "kalan_gorevler": gorev_listesi
+    }
+
+# Görev güncelle - PUT
+@app.put("/gorev-guncelle/{index}")
+def gorev_guncelle(index: int, gorev: YeniGorev):
+    if index < 0 or index >= len(gorev_listesi):
+        return {
+            "hata": "Bu numarada görev yok!",
+            "toplam_gorev": len(gorev_listesi)
+        }
+    
+    eski_baslik = gorev_listesi[index]["baslik"]
+    gorev_listesi[index] = {
+        "baslik": gorev.baslik,
+        "oncelik": gorev.oncelik
+    }
+    
+    return {
+        "mesaj": f"'{eski_baslik}' → '{gorev.baslik}' olarak güncellendi! ✏️",
+        "guncellenen_gorev": gorev_listesi[index],
+        "tum_gorevler": gorev_listesi
+    }
+
