@@ -1,15 +1,23 @@
 # StudyMate AI - Backend
 # Author: Rıfat Talha Keşkek
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from database import engine, get_db
+import models
+
+
+# Veritabanı tablolarını oluştur
+models.Base.metadata.create_all(bind=engine)
 
 
 # FastAPI uygulamamızı oluşturuyoruz
 app = FastAPI(
     title="StudyMate AI",
     description="AI-powered learning assistant for students",
-    version="0.1.0"
+    version="0.2.0"
 )
 
 
@@ -19,22 +27,18 @@ class YeniGorev(BaseModel):
     oncelik: str = "normal"
 
 
-# Görev listesi (geçici, bilgisayar belleğinde)
-gorev_listesi = []
-
-
-# Ana sayfa - Karşılama mesajı
+# Ana sayfa
 @app.get("/")
 def root():
     return {
         "message": "Merhaba! StudyMate AI'a hoş geldin! 🎓",
         "developer": "Rıfat Talha Keşkek",
         "status": "running",
-        "version": "0.1.0"
+        "version": "0.2.0 - Veritabanı entegre!"
     }
 
 
-# Sağlık kontrolü - Server çalışıyor mu?
+# Sağlık kontrolü
 @app.get("/health")
 def health_check():
     return {
@@ -43,105 +47,60 @@ def health_check():
     }
 
 
-# Hakkında - Proje bilgileri
-@app.get("/about")
-def about():
-    return {
-        "project": "StudyMate AI",
-        "description": "Öğrenciler için yapay zeka destekli çalışma asistanı",
-        "features": [
-            "📚 PDF özetleme",
-            "🤖 AI ile soru-cevap",
-            "⏱️ Pomodoro zamanlayıcı",
-            "📊 İlerleme takibi",
-            "💡 Akıllı flashcard'lar"
-        ],
-        "tech_stack": {
-            "backend": "Python + FastAPI",
-            "frontend": "React + TypeScript",
-            "database": "PostgreSQL",
-            "ai": "OpenAI GPT-4"
-        }
-    }
-
-
-# Selamlama - Parametre alma örneği
-@app.get("/selam/{isim}")
-def selamla(isim: str):
-    return {
-        "mesaj": f"Selam {isim}! StudyMate AI'a hoş geldin! 🎉",
-        "tavsiye": "Bugün hangi konuyu çalışacaksın?"
-    }
-
-
-# Pomodoro - Zamanlayıcı bilgisi
-@app.get("/pomodoro")
-def pomodoro():
-    return {
-        "calisma_suresi_dk": 25,
-        "kisa_mola_dk": 5,
-        "uzun_mola_dk": 15,
-        "tekrar_sayisi": 4,
-        "mesaj": "Hazır mısın? Pomodoro başlasın! 🍅"
-    }
-
-
-# Görev listesini getir - Dinamik
+# Tüm görevleri getir (veritabanından)
 @app.get("/gorevler")
-def gorevler():
+def gorevler(db: Session = Depends(get_db)):
+    tum_gorevler = db.query(models.Gorev).all()
     return {
-        "toplam": len(gorev_listesi),
-        "gorevler": gorev_listesi
+        "toplam": len(tum_gorevler),
+        "gorevler": tum_gorevler
     }
 
 
-# Yeni görev ekle - POST
+# Yeni görev ekle (veritabanına)
 @app.post("/gorev-ekle")
-def gorev_ekle(gorev: YeniGorev):
-    gorev_listesi.append({
-        "baslik": gorev.baslik,
-        "oncelik": gorev.oncelik
-    })
+def gorev_ekle(gorev: YeniGorev, db: Session = Depends(get_db)):
+    yeni_gorev = models.Gorev(
+        baslik=gorev.baslik,
+        oncelik=gorev.oncelik
+    )
+    db.add(yeni_gorev)
+    db.commit()
+    db.refresh(yeni_gorev)
     return {
         "mesaj": f"'{gorev.baslik}' görevi eklendi! ✅",
-        "toplam_gorev": len(gorev_listesi),
-        "tum_gorevler": gorev_listesi
+        "yeni_gorev": yeni_gorev
     }
 
-# Görev sil - DELETE
-@app.delete("/gorev-sil/{index}")
-def gorev_sil(index: int):
-    if index < 0 or index >= len(gorev_listesi):
-        return {
-            "hata": "Bu numarada görev yok!",
-            "toplam_gorev": len(gorev_listesi)
-        }
+
+# Görev sil (veritabanından)
+@app.delete("/gorev-sil/{gorev_id}")
+def gorev_sil(gorev_id: int, db: Session = Depends(get_db)):
+    gorev = db.query(models.Gorev).filter(models.Gorev.id == gorev_id).first()
+    if not gorev:
+        raise HTTPException(status_code=404, detail="Bu ID'de görev yok!")
     
-    silinen = gorev_listesi.pop(index)
+    silinen_baslik = gorev.baslik
+    db.delete(gorev)
+    db.commit()
     return {
-        "mesaj": f"'{silinen['baslik']}' silindi! 🗑️",
-        "toplam_gorev": len(gorev_listesi),
-        "kalan_gorevler": gorev_listesi
+        "mesaj": f"'{silinen_baslik}' silindi! 🗑️"
     }
 
-# Görev güncelle - PUT
-@app.put("/gorev-guncelle/{index}")
-def gorev_guncelle(index: int, gorev: YeniGorev):
-    if index < 0 or index >= len(gorev_listesi):
-        return {
-            "hata": "Bu numarada görev yok!",
-            "toplam_gorev": len(gorev_listesi)
-        }
+
+# Görev güncelle (veritabanında)
+@app.put("/gorev-guncelle/{gorev_id}")
+def gorev_guncelle(gorev_id: int, yeni_bilgi: YeniGorev, db: Session = Depends(get_db)):
+    gorev = db.query(models.Gorev).filter(models.Gorev.id == gorev_id).first()
+    if not gorev:
+        raise HTTPException(status_code=404, detail="Bu ID'de görev yok!")
     
-    eski_baslik = gorev_listesi[index]["baslik"]
-    gorev_listesi[index] = {
-        "baslik": gorev.baslik,
-        "oncelik": gorev.oncelik
-    }
-    
+    eski_baslik = gorev.baslik
+    gorev.baslik = yeni_bilgi.baslik
+    gorev.oncelik = yeni_bilgi.oncelik
+    db.commit()
+    db.refresh(gorev)
     return {
         "mesaj": f"'{eski_baslik}' → '{gorev.baslik}' olarak güncellendi! ✏️",
-        "guncellenen_gorev": gorev_listesi[index],
-        "tum_gorevler": gorev_listesi
+        "guncellenen": gorev
     }
-
